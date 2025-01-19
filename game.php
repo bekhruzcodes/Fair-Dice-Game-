@@ -1,33 +1,29 @@
 <?php
 declare(strict_types=1);
 
+require 'vendor/autoload.php';
+
 class Dice {
-    
     private $numbers;
     
     public function __construct($numbers) {
-     
         if (count($numbers) != 6) {
             throw new InvalidArgumentException("Need 6 numbers for dice");
         }
         $this->numbers = $numbers;
     }
-
-   
+    
     public function getNumbers() {
         return $this->numbers;
     }
-
-   
+    
     public function __toString() {
         return implode(',', $this->numbers);
     }
 }
 
-
 class DiceParser {
     public function parse($input) {
-        
         if (count($input) < 3) {
             throw new InvalidArgumentException(
                 "Need 3 or more dice\n" .
@@ -37,11 +33,8 @@ class DiceParser {
 
         $allDice = [];
         
-        
         foreach ($input as $diceInput) {
-          
             $numbers = explode(',', $diceInput);
-            
             
             foreach ($numbers as $num) {
                 if (!is_numeric($num)) {
@@ -49,9 +42,7 @@ class DiceParser {
                 }
             }
             
-           
             $numbers = array_map('intval', $numbers);
-            
             
             $allDice[] = new Dice($numbers);
         }
@@ -60,17 +51,14 @@ class DiceParser {
     }
 }
 
-
 class CryptoProvider {
     const HASH = 'sha3-256';
     const KEY_LENGTH = 32;
 
-  
     public static function makeKey() {
         return bin2hex(random_bytes(self::KEY_LENGTH));
     }
 
- 
     public static function makeHash($key, $number) {
         $binKey = hex2bin($key);
         if (!$binKey) {
@@ -79,7 +67,6 @@ class CryptoProvider {
         return strtoupper(hash_hmac(self::HASH, (string)$number, $binKey));
     }
 
-   
     public static function getRandom($max) {
         if ($max < 0) {
             throw new InvalidArgumentException('Max must be >= 0');
@@ -89,7 +76,6 @@ class CryptoProvider {
         $bytes = (int)ceil($bits / 8);
         $mask = (1 << $bits) - 1;
 
-     
         while (true) {
             $random = random_bytes($bytes);
             $value = 0;
@@ -104,12 +90,10 @@ class CryptoProvider {
         }
     }
 
- 
     public static function checkHash($key, $number, $hash) {
         return hash_equals(self::makeHash($key, $number), $hash);
     }
 }
-
 
 class NumberGenerator {
     private $crypto;
@@ -118,33 +102,28 @@ class NumberGenerator {
         $this->crypto = new CryptoProvider();
     }
 
-   
     public function getNumber($max) {
-        $key = $this->crypto->makeKey();
-        $num = $this->crypto->getRandom($max);
-        $hash = $this->crypto->makeHash($key, $num);
+        $key = CryptoProvider::makeKey();
+        $num = CryptoProvider::getRandom($max);
+        $hash = CryptoProvider::makeHash($key, $num);
         
         return [$num, $key, $hash];
     }
 
-    
     public function addNumbers($num1, $num2, $mod) {
         return ($num1 + $num2) % $mod;
     }
 
-    
     public function checkNumber($num, $key, $hash) {
-        return $this->crypto->checkHash($key, $num, $hash);
+        return CryptoProvider::checkHash($key, $num, $hash);
     }
 }
-
 
 class WinCalculator {
     public static function calcWinChance($dice1, $dice2) {
         $wins = 0;
-        $total = 36; 
+        $total = 36;
 
-   
         foreach ($dice1->getNumbers() as $num1) {
             foreach ($dice2->getNumbers() as $num2) {
                 if ($num1 > $num2) {
@@ -153,47 +132,43 @@ class WinCalculator {
             }
         }
 
-    
         return $wins / $total;
     }
 }
 
-
 class TableMaker {
     public static function makeTable($allDice) {
-        $output = "\n";
+        $table = new \Console_Table(CONSOLE_TABLE_ALIGN_LEFT, '|', 1);
         
-     
-        $headers = [];
-        for ($i = 0; $i < count($allDice); $i++) {
-            $headers[] = "Dice " . ($i + 1);
+        $headers = ['User dice v'];
+        foreach ($allDice as $dice) {
+            $headers[] = (string)$dice;
         }
-
-      
-        $output .= str_pad("", 10) . " | ";
-        foreach ($headers as $header) {
-            $output .= str_pad($header, 12) . " | ";
-        }
-        $output .= "\n" . str_repeat("-", strlen($output)) . "\n";
-
+        $table->setHeaders($headers);
+        
         foreach ($allDice as $i => $dice1) {
-            $output .= str_pad("Dice " . ($i + 1), 10) . " | ";
+            $row = [(string)$dice1];
             foreach ($allDice as $j => $dice2) {
                 if ($i == $j) {
-                    $prob = "-";
+                    $prob = WinCalculator::calcWinChance($dice1, $dice2);
+                    $row[] = sprintf("- (%.4f)", $prob);
                 } else {
-                    $prob = number_format(WinCalculator::calcWinChance($dice1, $dice2) * 100, 2) . "%";
+                    $prob = WinCalculator::calcWinChance($dice1, $dice2);
+                    $row[] = sprintf("%.4f", $prob);
                 }
-                $output .= str_pad($prob, 12) . " | ";
             }
-            $output .= "\n";
+            $table->addRow($row);
         }
 
+        $output = "\nProbability of winning for the user:\n";
+        $output .= "Each cell shows the probability of the dice in the row winning against the dice in the column.\n";
+        $output .= "Diagonal entries show probabilities against itself (marked with '-').\n\n";
+        $output .= $table->getTable();
+        
         return $output;
     }
 }
 
-// CONTROLLER
 class GameController {
     private $allDice;
     private $generator;
@@ -205,15 +180,12 @@ class GameController {
         $this->debug = $debug;
     }
 
-   
     public function startGame() {
         try {
-            
             $computerFirst = $this->decideFirstPlayer();
             
             if ($computerFirst) {
                 echo "I go first.\n";
-                
                 $computerDice = $this->computerPickDice();
                 $leftDice = array_filter($this->allDice, function($d) use ($computerDice) {
                     return $d !== $computerDice;
@@ -221,7 +193,6 @@ class GameController {
                 $playerDice = $this->playerPickDice(array_values($leftDice));
             } else {
                 echo "You go first.\n";
-                
                 $playerDice = $this->playerPickDice($this->allDice);
                 $leftDice = array_filter($this->allDice, function($d) use ($playerDice) {
                     return $d !== $playerDice;
@@ -229,11 +200,9 @@ class GameController {
                 $computerDice = $this->computerPickDice(array_values($leftDice));
             }
 
-            
             $computerRoll = $this->doComputerRoll();
             $playerRoll = $this->doPlayerRoll();
 
-            
             $this->showResult($computerRoll, $playerRoll);
             
         } catch (Exception $e) {
@@ -244,7 +213,6 @@ class GameController {
         }
     }
 
-    
     private function decideFirstPlayer() {
         echo "Let's decide who goes first.\n";
         list($num, $key, $hash) = $this->generator->getNumber(1);
@@ -274,12 +242,10 @@ class GameController {
             $playerNum = (int)$choice;
             echo "I picked: $num (KEY=$key)\n";
             
-           
             return ($num + $playerNum) % 2 == 1;
         }
     }
 
-    
     private function computerPickDice($available = null) {
         $choices = $available ?? $this->allDice;
         
@@ -288,7 +254,6 @@ class GameController {
         return $picked;
     }
 
-    
     private function playerPickDice($choices) {
         while (true) {
             echo "Pick your dice:\n";
@@ -319,83 +284,61 @@ class GameController {
         }
     }
 
-
     private function doComputerRoll() {
-        list($num, $key, $hash) = $this->generator->getNumber(5);
         echo "\nMy turn to roll.\n";
-        echo "I picked a number (HASH=$hash).\n";
-
-        while (true) {
-            echo "Add your number:\n";
-       
-            for ($i = 0; $i < 6; $i++) {
-                echo "$i - $i\n";
-            }
-            echo "X - quit\n";
-            echo "? - help\n";
-
-            $choice = trim(fgets(STDIN));
-
-            if ($choice == 'X') {
-                exit(0);
-            }
-            if ($choice == '?') {
-                $this->showHelp();
-                continue;
-            }
-
-            if (is_numeric($choice) && $choice >= 0 && $choice < 6) {
-                $playerNum = (int)$choice;
-                echo "I picked $num (KEY=$key)\n";
-                $result = $this->generator->addNumbers($num, $playerNum, 6);
-                echo "Result: $num + $playerNum = $result (mod 6)\n";
-                return $result;
-            }
-
-            echo "Pick 0-5.\n";
-        }
-    }
-
-   
-    private function doPlayerRoll() {
+        
         list($num, $key, $hash) = $this->generator->getNumber(5);
-        echo "\nYour turn to roll.\n";
-        echo "I picked a number (HASH=$hash).\n";
+        echo "HMAC of my choice: $hash\n";
+        
+        $playerNum = $this->getUserNumber();
+        
+        echo "My number was: $num (KEY=$key)\n";
+        $result = $this->generator->addNumbers($num, $playerNum, 6);
+        echo "Final result: ($num + $playerNum) % 6 = $result\n";
+        
+        return $result;
+    }
 
+    private function doPlayerRoll() {
+        echo "\nYour turn to roll.\n";
+        
+        list($num, $key, $hash) = $this->generator->getNumber(5);
+        echo "HMAC of my choice: $hash\n";
+        
+        $playerNum = $this->getUserNumber();
+        
+        echo "My number was: $num (KEY=$key)\n";
+        $result = $this->generator->addNumbers($num, $playerNum, 6);
+        echo "Final result: ($num + $playerNum) % 6 = $result\n";
+        
+        return $result;
+    }
+
+    private function getUserNumber() {
         while (true) {
-            echo "Add your number:\n";
-            
-       
+            echo "Choose your number (0-5):\n";
             for ($i = 0; $i < 6; $i++) {
                 echo "$i - $i\n";
             }
             echo "X - quit\n";
             echo "? - help\n";
-
+            
             $choice = trim(fgets(STDIN));
-
-            if ($choice == 'X') {
+            
+            if ($choice === 'X') {
                 exit(0);
             }
-            if ($choice == '?') {
+            if ($choice === '?') {
                 $this->showHelp();
                 continue;
             }
-
-          
             if (is_numeric($choice) && $choice >= 0 && $choice < 6) {
-                $playerNum = (int)$choice;
-                echo "I picked $num (KEY=$key)\n";
-                $result = $this->generator->addNumbers($num, $playerNum, 6);
-                echo "Result: $num + $playerNum = $result (mod 6)\n";
-                return $result;
+                return (int)$choice;
             }
-
-            echo "Pick 0-5.\n";
+            echo "Please choose a number between 0 and 5.\n";
         }
     }
 
-    
     private function showResult($computer, $player) {
         echo "Computer rolled: $computer\n";
         echo "You rolled: $player\n";
@@ -409,17 +352,18 @@ class GameController {
         }
     }
 
-    
     private function showHelp() {
-        echo "\nWin chances:\n";
+        echo "\nGame Rules:\n";
+        echo "1. Players take turns rolling dice\n";
+        echo "2. Each roll is determined by combining computer and player numbers\n";
+        echo "3. The player with the higher number wins\n";
+        echo "4. Numbers wrap around using modulo 6\n\n";
         echo TableMaker::makeTable($this->allDice);
         echo "\n";
     }
 }
 
-// START
 try {
-  
     if ($argc < 4) {
         throw new InvalidArgumentException(
             "Need 3 or more dice\n" .
@@ -427,14 +371,11 @@ try {
         );
     }
 
-   
     $inputs = array_slice($argv, 1);
     
- 
     $parser = new DiceParser();
     $dice = $parser->parse($inputs);
     
-  
     $game = new GameController($dice);
     $game->startGame();
     
